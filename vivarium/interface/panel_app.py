@@ -7,10 +7,12 @@ import panel as pn
 from param import Parameterized
 
 from bokeh.plotting import figure, curdoc
+from bokeh.layouts import column, row
 from bokeh.models import (
     PointDrawTool,
     HoverTool,
     Range1d,
+    Toggle as BkToggle,
 )
 
 from vivarium.controllers import VivariumController
@@ -66,13 +68,14 @@ def create_interfaces(component_list_config, controllers, state, panel_cls=pn.Co
 
 class WindowManager(Parameterized):
 
-    def __init__(self, controller=None, apply_changes=True, notebook_mode=False, testing_mode=False, server_timeout=30.0, **kwargs):
+    def __init__(self, controller=None, apply_changes=True, notebook_mode=False, testing_mode=False, server_timeout=30.0, fullscreen=False, **kwargs):
         super().__init__(**kwargs)
 
         # Basic state
         self.apply_changes = apply_changes
         self.testing_mode = testing_mode
         self.server_timeout = server_timeout
+        self.fullscreen = fullscreen
         self._streaming_active = False
         self._pending_state_update = threading.Event()
         self._state_lock = threading.Lock()
@@ -647,8 +650,9 @@ class WindowManager(Parameterized):
         # Create simulation control widgets
         self._setup_simulation_widgets()
 
-        # Create notebook widgets
-        self._setup_notebook_widgets()
+        # Create notebook widgets (not needed in fullscreen mode)
+        if not self.fullscreen:
+            self._setup_notebook_widgets()
 
         self.plot = self.create_plot()
 
@@ -1277,7 +1281,11 @@ class WindowManager(Parameterized):
             self.curdoc.theme = 'dark_minimal'
 
         p_tools = "crosshair,pan,wheel_zoom,box_zoom,reset,tap,box_select,lasso_select"
-        p = figure(tools=p_tools, active_drag="box_select")
+        fig_kwargs = {}
+        if self.fullscreen:
+            fig_kwargs['sizing_mode'] = 'stretch_both'
+            fig_kwargs['match_aspect'] = True
+        p = figure(tools=p_tools, active_drag="box_select", **fig_kwargs)
         # p.axis.major_label_text_font_size = "24px"
         p.axis.visible = True
         p.grid.visible = False
@@ -1300,6 +1308,18 @@ class WindowManager(Parameterized):
 
         :return: the simulation UI panel
         """
+        if self.fullscreen:
+            self.plot.x_range = Range1d(-100, 200)
+            self.plot.y_range = Range1d(-100, 200)
+            # Use pure Bokeh layout to avoid Panel sizing issues
+            bk_start = BkToggle(label="Start / Pause", button_type="success")
+            bk_drag = BkToggle(label="Drag & Drop", button_type="warning")
+            bk_start.on_change('active', lambda attr, old, new: self.start_toggle_cb(type('E', (), {'new': new})))
+            bk_drag.on_change('active', lambda attr, old, new: self.drag_n_drop_cb(type('E', (), {'new': new})))
+            layout = column(row(bk_start, bk_drag), self.plot, sizing_mode="stretch_both")
+            self.curdoc.add_root(layout)
+            return pn.pane.HTML("", width=0, height=0)
+
         self.config_columns = pn.Row(
             *[
                 pn.Column(
@@ -1348,14 +1368,13 @@ class WindowManager(Parameterized):
         ]
 
         right_side_tabs = pn.Tabs(*tabs_list, sizing_mode="stretch_both")
-        
+
         if hasattr(self.notebook_config, 'path') and self.notebook_config.path:
             right_side_tabs.active = 1
             self.start_toggle.visible = False
         else:
             right_side_tabs.active = 0
 
-        # Build the simulation UI
         simulation_ui = pn.Row(
             pn.Column(
                 pn.Row(
@@ -1386,19 +1405,20 @@ class WindowManager(Parameterized):
         self.plot_fps.param.watch(self.update_plot_fps, "value")
         # self.streaming_toggle.param.watch(self.streaming_toggle_cb, "value")
         self.drag_n_drop.param.watch(self.drag_n_drop_cb, "value")
-        # Notebook callbacks
-        self.check_jupyter_btn.on_click(self.check_jupyter_cb)
-        self.start_jupyter_btn.on_click(self.start_jupyter_cb)
-        self.stop_jupyter_btn.on_click(self.stop_jupyter_cb)
-        self.open_configured_notebook_btn.on_click(self.open_configured_notebook_cb)
-        self.open_new_notebook_btn.on_click(self.open_new_notebook_cb)
-        self.notebook_url.param.watch(self.notebook_url_cb, "value")
-        # Conflict resolution callbacks
-        self._jupyter_use_existing_btn.on_click(self._jupyter_use_existing_cb)
-        self._jupyter_kill_only_btn.on_click(self._jupyter_kill_only_cb)
-        self._jupyter_kill_restart_btn.on_click(self._jupyter_kill_restart_cb)
-        self._jupyter_use_different_port_btn.on_click(self._jupyter_use_different_port_cb)
-        self._jupyter_cancel_conflict_btn.on_click(self._jupyter_cancel_conflict_cb)
+        if not self.fullscreen:
+            # Notebook callbacks
+            self.check_jupyter_btn.on_click(self.check_jupyter_cb)
+            self.start_jupyter_btn.on_click(self.start_jupyter_cb)
+            self.stop_jupyter_btn.on_click(self.stop_jupyter_cb)
+            self.open_configured_notebook_btn.on_click(self.open_configured_notebook_cb)
+            self.open_new_notebook_btn.on_click(self.open_new_notebook_cb)
+            self.notebook_url.param.watch(self.notebook_url_cb, "value")
+            # Conflict resolution callbacks
+            self._jupyter_use_existing_btn.on_click(self._jupyter_use_existing_cb)
+            self._jupyter_kill_only_btn.on_click(self._jupyter_kill_only_cb)
+            self._jupyter_kill_restart_btn.on_click(self._jupyter_kill_restart_cb)
+            self._jupyter_use_different_port_btn.on_click(self._jupyter_use_different_port_cb)
+            self._jupyter_cancel_conflict_btn.on_click(self._jupyter_cancel_conflict_cb)
 
 
 if __name__ == "__main__":
