@@ -34,6 +34,12 @@ setup(
         "python-dotenv==1.2.1",
         "notebook==7.0.8",
         "certifi",  # SSL certificates for PyInstaller builds
+        # orbax-checkpoint>=0.10 requires uvloop which does not support Windows.
+        # Cap it globally for a consistent transitive dep across all platforms.
+        "orbax-checkpoint<0.10",
+        # orbax<0.10 pulls in simplejson<3.16.0 which lacks JSONDecodeError and
+        # breaks requests inside a PyInstaller bundle. Floor it to a safe version.
+        "simplejson>=3.16.0",
     ],
     
     extras_require={
