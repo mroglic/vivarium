@@ -17,6 +17,7 @@ from vivarium.simulator.grpc_server.simulator_client import SimulatorGRPCClient
 from vivarium.simulator.controller import SimulatorController
 from vivarium.utils.scene_configs import load_scene_config
 from vivarium.utils.timer import sleep_timer
+from vivarium.controllers.utils import Logger, RoutineHandler
 
 
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +63,8 @@ class VivariumController:
         self._interface_process = None
         self._ngrok_active = False
         self.interface_url = None
+        self.logger = Logger()
+        self.routine_handler = RoutineHandler()
 
         # Initialize in disconnected state
         self.client = None
@@ -141,6 +144,11 @@ class VivariumController:
         scene_config = scene_config or load_scene_config(client.scene_name)
         components_config = scene_config.environment.components
 
+        # Fetch subtype labels once. This list object is shared by reference across
+        # all entity/consumption/spawn controllers constructed below, so that
+        # set_subtype_labels() can update them all via a single in-place mutation.
+        subtype_labels = client.remote.controller_parameters.simulator.subtype_labels.obj()
+
         # Load controllers from scene config
         controllers = {}
         for name, c_config in components_config.component_list.items():
@@ -150,9 +158,31 @@ class VivariumController:
 
         self.controllers = controllers
         self.controllers['simulator'] = SimulatorController(name='simulator', remote=self.client.remote)
-        self.subtypes = self.controllers['simulator'].subtype_labels
+        self.subtypes = subtype_labels  # same object as in all controllers above
         if start_controller_thread:
             self.start_controller_thread()
+
+    def set_subtype_labels(self, new_labels):
+        """Rename subtype labels on this client.
+
+        Updates the label list in-place, so the change is immediately visible in
+        all entity, consumption, and spawn controllers (they all share the same
+        underlying list object).
+
+        You may provide fewer labels than the total number of subtypes; the
+        remaining ones keep their current labels. len(new_labels) must not
+        exceed len(self.subtypes).
+
+        Args:
+            new_labels: list of new label strings, at most len(self.subtypes) long.
+        """
+        self.ensure_connected()
+        if len(new_labels) > len(self.subtypes):
+            raise ValueError(
+                f"Expected at most {len(self.subtypes)} labels, got {len(new_labels)}. "
+                f"Current subtypes: {self.subtypes}"
+            )
+        self.subtypes[:] = list(new_labels) + self.subtypes[len(new_labels):]
 
     def is_connected(self, verify=True):
         """Check if connected to a server.
@@ -396,10 +426,35 @@ class VivariumController:
         changes = self.fetch_changes()
         self.client.step(changes)
 
+    def attach_routine(self, routine_fn, name=None, interval=1):
+        """Attach a routine to the controller.
+
+        :param routine_fn: routine function that takes the controller as argument
+        :param name: routine name, defaults to None (routine function name)
+        :param interval: routine execution interval, defaults to 1
+        """
+        self.routine_handler.attach_routine(routine_fn, name, interval)
+
+    def detach_routine(self, routine_fn):
+        """Detach a routine from the controller.
+
+        :param routine_fn: routine function or its name as a string
+        """
+        self.routine_handler.detach_routine(routine_fn)
+
+    def detach_all_routines(self):
+        """Detach all routines from the controller."""
+        self.routine_handler.detach_all_routines()
+        
+    def print_routines(self):
+        """Print the controller routines"""
+        self.routine_handler.print_routines()        
+
     def controller_step(self, catch_errors=True):
         # Step through controllers (e.g. routines and behaviors)
         for _, controller in self.controllers.items():
             controller.step(time=self.time, catch_errors=catch_errors)
+        self.routine_handler.routine_step(self, self.time, catch_errors)
 
     def step(self, catch_errors=True):
         changed_applied = False
