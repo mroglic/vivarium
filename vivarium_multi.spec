@@ -185,10 +185,15 @@ jupyter_pkg_datas = (
     + collect_data_files('jsonschema')
     + collect_data_files('rfc3987_syntax')  # Contains .lark grammar files
     + collect_data_files('debugpy')  # Contains _vendored directory needed by ipykernel
+    + collect_data_files('matplotlib')  # Font data, style sheets, etc.
     # Include package metadata for entry points (needed for kernel provisioner)
     + copy_metadata('jupyter_client')
     + copy_metadata('jupyter_server')
     + copy_metadata('ipykernel')
+    # matplotlib_inline registers 'inline' as a matplotlib backend via entry points.
+    # Without this metadata, matplotlib's BackendRegistry (3.9+) can't find 'inline'
+    # and %matplotlib inline raises RuntimeError: 'inline' is not a recognised backend.
+    + copy_metadata('matplotlib-inline')
 )
 
 jupyter_analysis = Analysis(
@@ -212,15 +217,29 @@ jupyter_analysis = Analysis(
         'vivarium.controllers',
         'vivarium.simulator',
         'vivarium.simulator.grpc_server',
+        # matplotlib_inline provides the 'module://matplotlib_inline.backend_inline'
+        # backend that IPython/Jupyter sets automatically when running in a notebook.
+        # PyInstaller can't detect this dynamic backend load, so it must be explicit.
+        'matplotlib_inline',
+        'matplotlib_inline.backend_inline',
     ] + collect_submodules('notebook')
       + collect_submodules('jupyter_server')
       + collect_submodules('ipykernel')
       + collect_submodules('jupyter_client')
+      + collect_submodules('matplotlib_inline')
       + collect_submodules('vivarium'),
     hookspath=[],
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(project_root, 'scripts', 'rthook_jupyter_matplotlib.py')],
     excludes=[],
     noarchive=False,
+    # Tell the matplotlib backends hook to collect matplotlib_inline.
+    # Auto-discovery only finds backends via matplotlib.use() calls; IPython sets
+    # the inline backend via rcParams directly, so it is never auto-discovered.
+    hooksconfig={
+        'matplotlib': {
+            'backends': ['Agg', 'module://matplotlib_inline.backend_inline'],
+        },
+    },
 )
 
 # ============================================================================
