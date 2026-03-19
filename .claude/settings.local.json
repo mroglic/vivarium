@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(conda run:*)",
+      "Bash(conda info:*)",
+      "Bash(python3:*)",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}
